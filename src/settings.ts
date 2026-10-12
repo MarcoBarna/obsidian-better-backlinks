@@ -19,6 +19,10 @@ export interface BetterBacklinksSettings {
 	showUnlinkedMentions: boolean;
 	/** Show backlinks, created-in-period notes and unlinked mentions as one list, one card per note. */
 	combineGroups: boolean;
+	/** Show tasks from linking notes that relate to this note, in a Tasks group at the top. */
+	showTasks: boolean;
+	/** Include checked-off tasks in the Tasks group. */
+	showCompletedTasks: boolean;
 	/** Notes in these folders, at any depth, never appear in any group. */
 	excludedFolders: string[];
 	/** Paths of notes that never appear in any group. */
@@ -50,6 +54,8 @@ export const DEFAULT_SETTINGS: BetterBacklinksSettings = {
 	includeTitleMatches: true,
 	showUnlinkedMentions: true,
 	combineGroups: false,
+	showTasks: false,
+	showCompletedTasks: false,
 	excludedFolders: [],
 	excludedNotes: [],
 	showCreatedOnDay: false,

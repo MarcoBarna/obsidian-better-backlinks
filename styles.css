@@ -281,6 +281,12 @@
 	margin-top: 28px;
 }
 
+/* Tasks sit above the Backlinks header, so the space goes below them. */
+.better-backlinks-group.better-backlinks-tasks {
+	margin-top: 0;
+	margin-bottom: 28px;
+}
+
 /* Plain text that names this note: marked like a mention, with a dashed
    underline to say it isn't a link yet. */
 .better-backlinks-excerpt .better-backlinks-unlinked {
@@ -387,6 +393,11 @@
 
 .better-backlinks-sidebar .better-backlinks-group {
 	margin-top: 20px;
+}
+
+.better-backlinks-sidebar .better-backlinks-group.better-backlinks-tasks {
+	margin-top: 0;
+	margin-bottom: 20px;
 }
 
 /* A sidebar is about as narrow as a phone, so cards are compact the same way. */

@@ -46,6 +46,19 @@ Each card shows when the note was created (the time, and on a weekly note the we
 - **Recognizing weekly notes:** Obsidian has no built-in weekly notes. If the Periodic Notes plugin is on with weekly notes turned on, its format and folder are used. Otherwise weekly notes are named by ISO week, such as `2026-W40`, in any folder. Either way you can set **Week format** and **Folder** under **Weekly notes**. ISO tokens (`GGGG`, `WW`) give Monday-to-Sunday weeks; locale tokens (`gggg`, `ww`) follow your locale's first day of the week.
 - **Creation dates:** a note's creation date comes from its `created` property (for example `created: 2026-09-24` or `created: 2026-09-24T09:42`) when it has one, and from the file otherwise. File dates can change when notes are synced, copied or restored; a property doesn't. You can change which property is used under **Creation dates**.
 
+### Tasks
+
+Turn on **Show related tasks** under **Tasks** in the settings to collect the tasks that belong to this note in a **Tasks** group. It always sits above the backlinks, whatever the sort order and whether or not everything is shown in one list. Each note with related tasks gets a card, and each card shows just those tasks, not the blocks around them.
+
+A task in a linking note is related when:
+
+- it links here: `- [ ] Send the brief [[Project X]]`
+- it sits under a list item that links here: `- Tasks for [[Project X]]` with `- [ ] Another task` indented under it
+- it sits under a heading that links here, such as `## [[Project X]]`, including its subheadings
+- an item nested under it links here, or it's the nearest task above a plain item that does
+
+Each task shows with everything nested under it, so subtasks and notes come along. A task nested inside one that's already shown isn't shown again. Completed and cancelled tasks are left out unless you turn on **Include completed tasks**, so ticking a task off removes it from the group. Tasks that link here also stay in their note's backlink card.
+
 ### One list or groups
 
 By default, backlinks, notes created on the day or week, and unlinked mentions appear in separate groups. Turn on **Show everything in one list** to see them together in a single list, in the note's sort order, without group headings. A note that would appear in several groups gets one card that combines them, for example "1 mention · 1 unlinked · created 9:42 AM", with its excerpts and **Link** buttons together.
@@ -78,12 +91,12 @@ Everything takes its colours and fonts from your theme, in light and dark mode.
 - **Click a highlighted link** to jump to that exact spot in the source note. The link is selected and briefly flashes so you can find it.
 - **Click a highlighted property link** to open the source note with that property flashing.
 - **Tick a checkbox** in an excerpt to update the task in the source note. Apart from **Link** on unlinked mentions, this is the only change the plugin makes to your notes.
-- **Click a card's header** to collapse or expand it, or use **Collapse all / Expand all** in the Backlinks header for every card in the note: backlinks, notes created that day or week, and unlinked mentions. Each card remembers its state for the note you're viewing.
+- **Click a card's header** to collapse or expand it, or use **Collapse all / Expand all** in the Backlinks header for every card in the note: tasks, backlinks, notes created that day or week, and unlinked mentions. Each card remembers its state for the note you're viewing.
 - **Hover a title or link** while holding Cmd/Ctrl to see a Page Preview popover. You can change whether the modifier is needed under **Settings → Core plugins → Page preview → Better Backlinks**.
 
 ### Sorting
 
-Cards are sorted by modified date, newest first, unless you choose otherwise. The sort button in the Backlinks header offers name (A to Z or Z to A), modified date and created date (newest or oldest first). The order applies to every group (backlinks, notes created on the day or week, and unlinked mentions) and to the whole list when everything is shown in one list. Blocks inside a card stay in the order they appear in the note.
+Cards are sorted by modified date, newest first, unless you choose otherwise. The sort button in the Backlinks header offers name (A to Z or Z to A), modified date and created date (newest or oldest first). The order applies to every group (tasks, backlinks, notes created on the day or week, and unlinked mentions) and to the whole list when everything is shown in one list. Blocks inside a card stay in the order they appear in the note.
 
 The order you pick is saved for the note you're viewing. Other notes keep the default, which you can change in the settings. To make a note follow the default again, choose **Use default** in its sort menu. When sorting by created date, cards show when each note was created instead of when it was modified. Created dates come from a note's `created` property when it has one, and from the file otherwise.
 
@@ -109,6 +122,13 @@ Better Backlinks works on desktop and mobile and needs Obsidian 1.7.2 or later.
 | Include title matches | On | Shows notes whose title contains this note's name, even without a link. |
 | Show unlinked mentions | On | Lists notes that mention this note's name as plain text, with buttons to link them. |
 | Show everything in one list | Off | Combines backlinks, notes created on the day or week, and unlinked mentions into one list, with one card per note. |
+
+**Tasks**
+
+| Setting | Default | |
+| --- | --- | --- |
+| Show related tasks | Off | Adds the **Tasks** group above the backlinks, with the tasks from linking notes that belong to this note. |
+| Include completed tasks | Off | Also shows checked-off and cancelled tasks in the **Tasks** group. |
 
 **Excluding folders and notes**
 
@@ -140,7 +160,7 @@ Type in **Exclude a folder or note** and pick a match from the suggestions to ke
 
 Better Backlinks works entirely inside your vault and makes no network requests.
 
-- **Backlinks** come from Obsidian's own link index, plus the text of each linking note, read to show its excerpt.
+- **Backlinks** come from Obsidian's own link index, plus the text of each linking note, read to show its excerpt and, when the Tasks group is on, to find its related tasks.
 - **Title matches** and **notes created on a day or week** go through the list of your notes, using their names, properties and file dates.
 - **Unlinked mentions** read your notes' text to find this note's name written without a link.
 

@@ -1,5 +1,5 @@
-// The backlinks content: the Backlinks, Created on this day / this week and
-// Unlinked mentions groups and their cards, for one note. Hosted at the bottom of a
+// The backlinks content: the Tasks, Backlinks, Created on this day / this week
+// and Unlinked mentions groups and their cards, for one note. Hosted at the bottom of a
 // note (view.ts) or in the sidebar (sidebar.ts).
 
 import {
@@ -15,6 +15,7 @@ import {
 import {
 	findBacklinkSources,
 	findCreatedIn,
+	findTaskSources,
 	findUnlinked,
 	loadExcerpts,
 	mentionCount,
@@ -53,6 +54,13 @@ export class BacklinksPanel extends Component implements HoverParent {
 	private readonly sortEl: HTMLElement;
 	private readonly cardsEl: HTMLElement;
 	private readonly cards = new Map<string, Card>();
+	private readonly tasksGroupEl: HTMLElement;
+	private readonly tasksCountEl: HTMLElement;
+	private readonly tasksCardsEl: HTMLElement;
+	private readonly taskCards = new Map<string, Card>();
+	/** Backlinks with tasks related to the current note; empty while the Tasks group is off. */
+	private taskSources: BacklinkSource[] = [];
+	private taskToken = 0;
 	private readonly createdGroupEl: HTMLElement;
 	private readonly createdTitleEl: HTMLElement;
 	private readonly createdCountEl: HTMLElement;
@@ -80,6 +88,13 @@ export class BacklinksPanel extends Component implements HoverParent {
 	) {
 		super();
 		const panelEl = (this.el = createDiv({ cls: "better-backlinks-panel" }));
+		// Tasks come first, whatever the sort order or list layout.
+		this.tasksGroupEl = panelEl.createDiv({ cls: "better-backlinks-group better-backlinks-tasks" });
+		this.tasksGroupEl.hide();
+		const tasksHeaderEl = this.tasksGroupEl.createDiv({ cls: "better-backlinks-header" });
+		tasksHeaderEl.createDiv({ cls: "better-backlinks-title", text: "Tasks" });
+		this.tasksCountEl = tasksHeaderEl.createDiv({ cls: "better-backlinks-count" });
+		this.tasksCardsEl = this.tasksGroupEl.createDiv({ cls: "better-backlinks-cards" });
 		const headerEl = panelEl.createDiv({ cls: "better-backlinks-header" });
 		headerEl.createDiv({ cls: "better-backlinks-title", text: "Backlinks" });
 		this.countEl = headerEl.createDiv({ cls: "better-backlinks-count" });
@@ -120,6 +135,7 @@ export class BacklinksPanel extends Component implements HoverParent {
 
 	override onunload() {
 		this.scanToken++;
+		this.taskToken++;
 		this.clearCards();
 		this.el.remove();
 	}
@@ -131,6 +147,8 @@ export class BacklinksPanel extends Component implements HoverParent {
 		this.target = file;
 		this.linkedSources = [];
 		this.createdSources = [];
+		this.taskSources = [];
+		this.taskToken++;
 	}
 
 	/** Recomputes the backlinks; only cards whose source changed are re-rendered. */
@@ -154,7 +172,19 @@ export class BacklinksPanel extends Component implements HoverParent {
 			? findCreatedIn(this.app, target, period.range, this.plugin.settings.createdProperty.trim(), excluded)
 			: [];
 		this.startUnlinkedScan(target);
+		void this.loadTasks(target, sources);
 		this.render();
+	}
+
+	/** Finds the related tasks among the backlinks, then renders them. */
+	private async loadTasks(target: TFile, linked: BacklinkSource[]) {
+		const token = ++this.taskToken;
+		const { showTasks, showCompletedTasks } = this.plugin.settings;
+		const found = showTasks ? await findTaskSources(this.app, linked, showCompletedTasks) : [];
+		if (token !== this.taskToken || target !== this.target) return;
+		const before = this.taskSources;
+		this.taskSources = found;
+		if (found.length > 0 || before.length > 0) this.render();
 	}
 
 	/** Re-checks one note for unlinked mentions after it changed or was created. */
@@ -198,7 +228,7 @@ export class BacklinksPanel extends Component implements HoverParent {
 		);
 	}
 
-	/** Shows the backlink cards, then the notes created that day, then the unlinked mentions. */
+	/** Shows the tasks, then the backlink cards, then the notes created that day, then the unlinked mentions. */
 	private render() {
 		const target = this.target;
 		if (!target || !this.host.isLive()) return;
@@ -206,15 +236,20 @@ export class BacklinksPanel extends Component implements HoverParent {
 		const linked = [...this.linkedSources].sort(compare);
 		const unlinked = [...this.unlinkedSources.values()].sort(compare);
 		const created = [...this.createdSources].sort(compare);
+		const tasks = [...this.taskSources].sort(compare);
 		this.sortEl.setAttr("aria-label", `Sort: ${sortLabel(this.plugin.getSort(target.path))}`);
 
-		const shown = linked.length > 0 || unlinked.length > 0 || created.length > 0;
+		const shown = linked.length > 0 || unlinked.length > 0 || created.length > 0 || tasks.length > 0;
 		if (!shown) {
 			this.clearCards();
 			this.host.onRender(false);
 			return;
 		}
 		const { expandUpTo } = this.plugin.settings;
+
+		this.tasksGroupEl.toggle(tasks.length > 0);
+		this.tasksCountEl.setText(plural(tasks.reduce((n, s) => n + (s.taskCount ?? 0), 0), "task"));
+		this.syncCards(this.taskCards, this.tasksCardsEl, tasks, () => tasks.length <= expandUpTo);
 
 		if (this.combined) {
 			// One list, one card per note, in the note's sort order.
@@ -261,7 +296,8 @@ export class BacklinksPanel extends Component implements HoverParent {
 	 * kept apart from a note's backlink card.
 	 */
 	collapseIdFor(source: BacklinkSource): string {
-		return this.combined ? source.file.path : collapseId(source);
+		// Tasks keep their own group, and so their own key, in the combined list too.
+		return this.combined && source.kind !== "task" ? source.file.path : collapseId(source);
 	}
 
 	/** Brings one group's cards in line with `sources`: adds, updates, reorders and removes. */
@@ -356,14 +392,21 @@ export class BacklinksPanel extends Component implements HoverParent {
 	}
 
 	private allCards(): Card[] {
-		return [...this.cards.values(), ...this.createdCards.values(), ...this.unlinkedCards.values()];
+		return [
+			...this.taskCards.values(),
+			...this.cards.values(),
+			...this.createdCards.values(),
+			...this.unlinkedCards.values(),
+		];
 	}
 
 	private clearCards() {
 		for (const card of this.allCards()) this.removeChild(card);
+		this.taskCards.clear();
 		this.cards.clear();
 		this.createdCards.clear();
 		this.unlinkedCards.clear();
+		this.tasksCardsEl.empty();
 		this.cardsEl.empty();
 		this.createdCardsEl.empty();
 		this.unlinkedCardsEl.empty();
@@ -371,7 +414,7 @@ export class BacklinksPanel extends Component implements HoverParent {
 
 	/**
 	 * Collapse all / Expand all covers every card in the note that can expand:
-	 * backlinks, notes created that day or week, and unlinked mentions.
+	 * tasks, backlinks, notes created that day or week, and unlinked mentions.
 	 * Title-match cards have no body, so they're left out.
 	 */
 	private expandableCards(): Card[] {
@@ -578,6 +621,8 @@ class Card extends Component {
 		} else {
 			if (source.kind === "created") {
 				// Only here for being created in the period.
+			} else if (source.kind === "task") {
+				count(source.taskCount ?? 0, "task");
 			} else if (titleMatch && mentionCount(source) === 0) {
 				this.metaEl.createSpan({ cls: label, text: "title match · " });
 			} else {
@@ -687,14 +732,14 @@ class Card extends Component {
 		const sig = signature(source);
 		this.renderedSignature = sig;
 
-		const excerpts = await loadExcerpts(this.panel.app, source, target);
+		const { mentionsPerCard: limit, showCompletedTasks } = this.panel.plugin.settings;
+		const excerpts = await loadExcerpts(this.panel.app, source, target, { includeCompletedTasks: showCompletedTasks });
 		if (this.renderedSignature !== sig || !this.alive) return;
 
 		if (this.bodyComponent) this.removeChild(this.bodyComponent);
 		const component = this.addChild(new Component());
 		this.bodyComponent = component;
 
-		const limit = this.panel.plugin.settings.mentionsPerCard;
 		const shown = this.showAll ? excerpts : excerpts.slice(0, limit);
 		const fragment = createDiv();
 		// Property links sit above the body excerpts and don't count toward the limit.
@@ -711,7 +756,7 @@ class Card extends Component {
 		if (hidden > 0) {
 			const moreEl = fragment.createDiv({
 				cls: "better-backlinks-more",
-				text: `+${plural(hidden, "more mention")} in this note`,
+				text: `+${plural(hidden, source.kind === "task" ? "more task" : "more mention")} in this note`,
 				attr: { role: "button", tabindex: "0" },
 			});
 			moreEl.addEventListener("click", () => {
@@ -813,7 +858,7 @@ class Card extends Component {
 	}
 }
 
-/** A card's key in the saved collapse state; unlinked cards are kept apart from linked ones. */
+/** A card's key in the saved collapse state; unlinked, created and task cards are kept apart from linked ones. */
 function collapseId(source: BacklinkSource): string {
 	return source.kind === "linked" ? source.file.path : `${source.file.path}\n${source.kind}`;
 }

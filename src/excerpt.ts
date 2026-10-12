@@ -70,6 +70,45 @@ export function extractExcerpts(
 	return mergeBlocks(blocks).map((block) => doc.toExcerpt(block, targetEmbeds, markMentions));
 }
 
+/**
+ * Builds one excerpt per task related to the current note, each showing just
+ * the task and what's nested under it. A task is related when a link or embed
+ * of the current note sits on it, in an item nested under it, under a heading
+ * that links here, or under a plain list item that links here (with no task
+ * between). The nearest task above a plain linking item counts too. Without
+ * `includeCompleted`, checked-off tasks are left out, though an open subtask
+ * of one still shows. Tasks nested in a shown task aren't shown again.
+ */
+export function extractTasks(
+	text: string,
+	cache: CachedMetadata,
+	mentions: Mention[],
+	targetEmbeds: Pos[] = [],
+	{ includeCompleted = false } = {},
+): Excerpt[] {
+	const lines = text.split(/\r?\n/);
+	const doc = new DocStructure(lines, cache);
+	const refLines = [...mentions.map((m) => m.position.start.line), ...targetEmbeds.map((p) => p.start.line)].filter(
+		(line) => !doc.isInCode(line),
+	);
+
+	const excerpts: Excerpt[] = [];
+	let coveredTo = -1;
+	for (const task of doc.relatedTasks(refLines)) {
+		if (!includeCompleted && !isOpenTask(task.task)) continue;
+		if (task.position.start.line <= coveredTo) continue;
+		const excerpt = doc.taskExcerpt(task, mentions, targetEmbeds);
+		coveredTo = excerpt.endLine;
+		excerpts.push(excerpt);
+	}
+	return excerpts;
+}
+
+/** Checked (`x`) and cancelled (`-`) tasks are done; any other status, such as `/` for in progress, is open. */
+export function isOpenTask(status: string | undefined): boolean {
+	return status !== undefined && !["x", "X", "-"].includes(status);
+}
+
 /** Merges blocks that overlap. */
 function mergeBlocks(blocks: Block[]): Block[] {
 	const sorted = [...blocks].sort((a, b) => a.start - b.start || b.end - a.end);
@@ -174,6 +213,56 @@ class DocStructure {
 			startLine: block.start,
 			endLine: block.end,
 		};
+	}
+
+	/** The tasks a reference on one of `lines` makes related (see extractTasks), in document order. */
+	relatedTasks(lines: number[]): ListItemCache[] {
+		const related = new Set<ListItemCache>();
+		const addTasksIn = (item: ListItemCache) => {
+			if (item.task !== undefined) related.add(item);
+			for (const child of this.children.get(item) ?? []) addTasksIn(child);
+		};
+		for (const line of lines) {
+			const heading = this.headings.find((h) => h.position.start.line === line);
+			if (heading) {
+				const end = this.headingSectionEnd(heading);
+				for (const item of this.items) {
+					const start = item.position.start.line;
+					if (item.task !== undefined && line < start && start <= end) related.add(item);
+				}
+				continue;
+			}
+			const item = this.listItemAt(line);
+			if (!item) continue;
+			addTasksIn(item);
+			if (item.task !== undefined) continue;
+			for (let p = this.parentOf.get(item); p; p = this.parentOf.get(p)) {
+				if (p.task === undefined) continue;
+				related.add(p);
+				break;
+			}
+		}
+		return this.items.filter((item) => related.has(item));
+	}
+
+	/** One task with everything nested under it, outdented so it renders as a list of its own. */
+	taskExcerpt(task: ListItemCache, mentions: Mention[], targetEmbeds: Pos[]): Excerpt {
+		const start = task.position.start.line;
+		const end = this.subtreeEnd(task);
+		const inside = mentions
+			.filter((m) => start <= m.position.start.line && m.position.start.line <= end)
+			.sort((a, b) => a.position.start.offset - b.position.start.offset);
+		const excerpt = this.toExcerpt({ start, end, mentions: inside }, targetEmbeds, false);
+		// A nested task keeps its indentation (and any quote markers) otherwise,
+		// and four spaces would render it as a code block.
+		const prefix = /^[\s>]*/.exec(this.lines[start] ?? "")?.[0] ?? "";
+		if (prefix) {
+			excerpt.markdown = excerpt.markdown
+				.split("\n")
+				.map((line) => (line.startsWith(prefix) ? line.slice(prefix.length) : line))
+				.join("\n");
+		}
+		return excerpt;
 	}
 
 	private sectionAt(line: number) {

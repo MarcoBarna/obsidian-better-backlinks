@@ -9,7 +9,7 @@ import { createdAt, type CreatedAt, type MomentFn, type Period } from "./periodi
 // callable under TypeScript's default module interop; at runtime it is the
 // moment function.
 export const obsidianMoment = moment as unknown as MomentFn;
-import { extractExcerpts, noteStartExcerpt, type Excerpt, type Mention } from "./excerpt";
+import { extractExcerpts, extractTasks, noteStartExcerpt, type Excerpt, type Mention } from "./excerpt";
 import { titleMatcher, type TitleMatch } from "./title-match";
 import { findUnlinkedMentions } from "./unlinked";
 
@@ -19,8 +19,11 @@ import { findUnlinkedMentions } from "./unlinked";
  * the note's text.
  */
 export interface BacklinkSource {
-	/** "created": not a backlink, but a note created on the day of the current daily note. */
-	kind: "linked" | "unlinked" | "created";
+	/**
+	 * "created": not a backlink, but a note created on the day of the current daily note.
+	 * "task": a backlink shown in the Tasks group, as its tasks related to the current note.
+	 */
+	kind: "linked" | "unlinked" | "created" | "task";
 	file: TFile;
 	/** Links to the current note, or for unlinked sources, the plain-text mentions. */
 	mentions: Mention[];
@@ -37,12 +40,14 @@ export interface BacklinkSource {
 	 * another reason; only set when everything is shown in one combined list.
 	 */
 	unlinked?: Mention[];
+	/** For a "task" source: how many related tasks it shows. */
+	taskCount?: number;
 }
 
 /** An excerpt for a card, with the kind of content it shows. */
 export interface CardExcerpt {
 	excerpt: Excerpt;
-	kind: "linked" | "unlinked" | "created";
+	kind: "linked" | "unlinked" | "created" | "task";
 }
 
 export interface FindOptions {
@@ -163,16 +168,53 @@ export async function findUnlinked(app: App, file: TFile, target: TFile): Promis
 }
 
 /**
- * Reads the source note and builds its card's excerpts: the blocks around its
- * links, then the blocks around its plain-text mentions, or, when it has
- * neither, a preview of how it starts if it's there for being created in the
- * current periodic note's day or week.
+ * The backlinks among `linked` that have tasks related to the current note,
+ * each as a "task" source for the Tasks group. Reads only notes whose cache
+ * shows they have tasks at all.
  */
-export async function loadExcerpts(app: App, source: BacklinkSource, target: TFile): Promise<CardExcerpt[]> {
+export async function findTaskSources(
+	app: App,
+	linked: BacklinkSource[],
+	includeCompleted: boolean,
+): Promise<BacklinkSource[]> {
+	const found = await Promise.all(
+		linked.map(async (source): Promise<BacklinkSource | null> => {
+			if (source.mentions.length === 0 && source.targetEmbeds.length === 0) return null;
+			const cache = app.metadataCache.getFileCache(source.file);
+			if (!cache?.listItems?.some((item) => item.task !== undefined)) return null;
+			const text = await app.vault.cachedRead(source.file);
+			const taskCount = extractTasks(text, cache, source.mentions, source.targetEmbeds, { includeCompleted }).length;
+			if (taskCount === 0) return null;
+			return { ...source, kind: "task", propertyMentions: [], titleMatch: null, taskCount };
+		}),
+	);
+	return found.filter((source): source is BacklinkSource => source !== null);
+}
+
+/**
+ * Reads the source note and builds its card's excerpts: for a Tasks card, its
+ * related tasks; otherwise the blocks around its links, then the blocks around
+ * its plain-text mentions, or, when it has neither, a preview of how it starts
+ * if it's there for being created in the current periodic note's day or week.
+ */
+export async function loadExcerpts(
+	app: App,
+	source: BacklinkSource,
+	target: TFile,
+	{ includeCompletedTasks = false } = {},
+): Promise<CardExcerpt[]> {
 	const cache = app.metadataCache.getFileCache(source.file);
 	if (!cache) return [];
 	const text = await app.vault.cachedRead(source.file);
 	const excerpts: CardExcerpt[] = [];
+
+	if (source.kind === "task") {
+		const options = { includeCompleted: includeCompletedTasks };
+		return extractTasks(text, cache, source.mentions, source.targetEmbeds, options).map((excerpt) => ({
+			excerpt,
+			kind: "task",
+		}));
+	}
 
 	if (source.kind === "linked") {
 		for (const excerpt of extractExcerpts(text, cache, source.mentions, source.targetEmbeds)) {

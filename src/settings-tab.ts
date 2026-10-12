@@ -93,6 +93,23 @@ export class BetterBacklinksSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
+				heading: "Tasks",
+				items: [
+					{
+						name: "Show related tasks",
+						desc: "Show tasks from notes that link here in a Tasks group above the backlinks. A task counts when it links here, sits under a list item or heading that links here, or has a nested item that links here. Each shows just the task and what's nested under it.",
+						aliases: ["checkboxes", "to-do", "todo"],
+						control: { type: "toggle", key: "showTasks" },
+					},
+					{
+						name: "Include completed tasks",
+						desc: "Also show tasks that are checked off. When off, a task leaves the group once it's done.",
+						control: { type: "toggle", key: "showCompletedTasks" },
+					},
+				],
+			},
+			{
+				type: "group",
 				heading: "Excluded folders and notes",
 				items: [
 					{
