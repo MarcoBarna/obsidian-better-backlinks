@@ -30,7 +30,7 @@ import { UNLINKED_CLASS, type Excerpt, type Mention } from "./excerpt";
 import { formatAge, plural, toggleTask } from "./format";
 import { linkMentions } from "./link-mention";
 import type BetterBacklinksPlugin from "./main";
-import { openMention, openProperty } from "./navigate";
+import { openHeading, openMention, openProperty } from "./navigate";
 import { propertyRows } from "./properties";
 import { combineSources } from "./combine";
 import { compareBy, SORT_ORDERS, sortLabel } from "./sort";
@@ -611,6 +611,13 @@ export class BacklinksPanel extends Component implements HoverParent {
 			return;
 		}
 
+		const headingEl = el.closest<HTMLElement>(".better-backlinks-heading-link");
+		if (headingEl) {
+			evt.preventDefault();
+			void openHeading(this.app, card.source.file, Number(headingEl.dataset.line), evt);
+			return;
+		}
+
 		const mentionEl = el.closest<HTMLElement>(".better-backlinks-mention");
 		if (mentionEl) {
 			evt.preventDefault();
@@ -886,7 +893,8 @@ class Card extends Component {
 		const sig = signature(source);
 		this.renderedSignature = sig;
 
-		const { mentionsPerCard: limit, showCompletedTasks } = this.panel.plugin.settings;
+		const { mentionsPerCard: limit, showCompletedTasks, showHeadingPath, headingPathClickable } =
+			this.panel.plugin.settings;
 		const excerpts = await loadExcerpts(this.panel.app, source, target, { includeCompletedTasks: showCompletedTasks });
 		if (this.renderedSignature !== sig || !this.alive) return;
 
@@ -899,7 +907,23 @@ class Card extends Component {
 		// Property links sit above the body excerpts and don't count toward the limit.
 		if (source.propertyMentions.length > 0) this.renderProperties(fragment, target);
 		for (const { excerpt, kind } of shown) {
-			const excerptEl = fragment.createDiv({ cls: "better-backlinks-excerpt markdown-rendered" });
+			const blockEl = fragment.createDiv({ cls: "better-backlinks-block" });
+			if (showHeadingPath && excerpt.headingPath.length > 0) {
+				const pathEl = blockEl.createDiv({ cls: "better-backlinks-heading-path" });
+				excerpt.headingPath.forEach((heading, i) => {
+					if (i > 0) pathEl.createSpan({ cls: "better-backlinks-heading-sep", text: " › " });
+					if (!headingPathClickable) {
+						pathEl.createSpan({ text: heading.text });
+						return;
+					}
+					pathEl.createEl("a", {
+						cls: "better-backlinks-heading-link",
+						text: heading.text,
+						attr: { "data-line": String(heading.line) },
+					});
+				});
+			}
+			const excerptEl = blockEl.createDiv({ cls: "better-backlinks-excerpt markdown-rendered" });
 			await MarkdownRenderer.render(this.panel.app, excerpt.markdown, excerptEl, source.file.path, component);
 			this.decorate(excerptEl, excerpt, kind, target);
 		}
