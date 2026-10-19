@@ -924,7 +924,12 @@ class Card extends Component {
 				});
 			}
 			const excerptEl = blockEl.createDiv({ cls: "better-backlinks-excerpt markdown-rendered" });
-			await MarkdownRenderer.render(this.panel.app, excerpt.markdown, excerptEl, source.file.path, component);
+			try {
+				await MarkdownRenderer.render(this.panel.app, excerpt.markdown, excerptEl, source.file.path, component);
+			} catch (error) {
+				// A post-processor from another plugin can throw; keep what was rendered instead of leaving the card empty.
+				console.error("Better Backlinks: rendering an excerpt failed", error);
+			}
 			this.decorate(excerptEl, excerpt, kind, target);
 		}
 		if (source.created && excerpts.length === 0 && source.propertyMentions.length === 0) {
