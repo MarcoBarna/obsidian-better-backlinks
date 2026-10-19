@@ -45,6 +45,25 @@ export interface PanelHost {
 	onRender(shown: boolean): void;
 }
 
+const PROP_SEP = "\u0000";
+const FILTER_MAX_PROPERTY_VALUES = 100;
+/** Tags already have their own filter section. */
+const FILTER_SKIPPED_PROPERTIES = new Set(["tags", "tag"]);
+
+interface BacklinkFilter {
+	folders: Set<string>;
+	tags: Set<string>;
+	props: Set<string>;
+}
+
+function emptyFilter(): BacklinkFilter {
+	return { folders: new Set(), tags: new Set(), props: new Set() };
+}
+
+function filterCount(filter: BacklinkFilter): number {
+	return filter.folders.size + filter.tags.size + filter.props.size;
+}
+
 export class BacklinksPanel extends Component implements HoverParent {
 	hoverPopover: HoverPopover | null = null;
 	/** The panel's element, which the host places wherever it shows the panel. */
@@ -54,8 +73,8 @@ export class BacklinksPanel extends Component implements HoverParent {
 	private readonly toggleAllEl: HTMLElement;
 	private readonly sortEl: HTMLElement;
 	private readonly filterEl: HTMLElement;
-	/** Folder and tag filters for the current note; deliberately not persisted. */
-	private filter = { folders: new Set<string>(), tags: new Set<string>() };
+	/** Folder, tag and property filters for the current note; deliberately not persisted. */
+	private filter = emptyFilter();
 	private filterPool: BacklinkSource[] = [];
 	private readonly cardsEl: HTMLElement;
 	private readonly cards = new Map<string, Card>();
@@ -107,7 +126,7 @@ export class BacklinksPanel extends Component implements HoverParent {
 		setIcon(this.sortEl, "arrow-up-narrow-wide");
 		this.filterEl = headerEl.createDiv({
 			cls: "better-backlinks-filter clickable-icon",
-			attr: { role: "button", tabindex: "0", "aria-label": "Filter by folder or tag" },
+			attr: { role: "button", tabindex: "0", "aria-label": "Filter by folder, tag or property" },
 		});
 		setIcon(this.filterEl, "filter");
 		this.toggleAllEl = headerEl.createEl("button", { cls: "better-backlinks-toggle-all" });
@@ -160,7 +179,7 @@ export class BacklinksPanel extends Component implements HoverParent {
 	/** Points the panel at a note (or none); a different note starts afresh. */
 	setTarget(file: TFile | null) {
 		if (file === this.target) return;
-		this.filter = { folders: new Set(), tags: new Set() };
+		this.filter = emptyFilter();
 		this.clearCards();
 		this.target = file;
 		this.linkedSources = [];
@@ -264,7 +283,7 @@ export class BacklinksPanel extends Component implements HoverParent {
 			return;
 		}
 		this.filterPool = [...allLinked, ...allUnlinked, ...allCreated, ...allTasks];
-		this.filterEl.toggleClass("is-active", this.filter.folders.size + this.filter.tags.size > 0);
+		this.filterEl.toggleClass("is-active", filterCount(this.filter) > 0);
 		const passes = (list: BacklinkSource[]) => list.filter((source) => this.passesFilter(source.file));
 		const linked = passes(allLinked);
 		const unlinked = passes(allUnlinked);
@@ -382,7 +401,7 @@ export class BacklinksPanel extends Component implements HoverParent {
 	}
 
 	private passesFilter(file: TFile): boolean {
-		const { folders, tags } = this.filter;
+		const { folders, tags, props } = this.filter;
 		if (folders.size > 0) {
 			const parent = file.parent?.path ?? "/";
 			if (![...folders].some((f) => parent === f || (f !== "/" && parent.startsWith(`${f}/`)))) return false;
@@ -391,22 +410,56 @@ export class BacklinksPanel extends Component implements HoverParent {
 			const own = this.fileTags(file);
 			if (!own.some((t) => [...tags].some((wanted) => t === wanted || t.startsWith(`${wanted}/`)))) return false;
 		}
+		if (props.size > 0) {
+			const own = this.fileProperties(file);
+			const byKey = new Map<string, Set<string>>();
+			for (const entry of props) {
+				const [key = "", value = ""] = entry.split(PROP_SEP);
+				byKey.set(key, (byKey.get(key) ?? new Set()).add(value));
+			}
+			for (const [key, values] of byKey) {
+				if (![...values].some((v) => own.has(`${key}${PROP_SEP}${v}`))) return false;
+			}
+		}
 		return true;
+	}
+
+	/** The note's frontmatter as `key<sep>value` entries; list values give one entry each, nested objects are skipped. */
+	private fileProperties(file: TFile): Set<string> {
+		const out = new Set<string>();
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+		if (!frontmatter) return out;
+		for (const [key, raw] of Object.entries(frontmatter)) {
+			if (key === "position" || FILTER_SKIPPED_PROPERTIES.has(key.toLowerCase())) continue;
+			for (const value of Array.isArray(raw) ? raw : [raw]) {
+				if (value === null || value === undefined || typeof value === "object") continue;
+				const text = String(value).trim();
+				if (text) out.add(`${key}${PROP_SEP}${text}`);
+			}
+		}
+		return out;
 	}
 
 	private showFilterMenu(evt: MouseEvent | null, position?: { x: number; y: number }) {
 		const folders = new Set<string>(this.filter.folders);
 		const tags = new Set<string>(this.filter.tags);
+		const valuesByKey = new Map<string, Set<string>>();
+		const addProp = (entry: string) => {
+			const [key = "", value = ""] = entry.split(PROP_SEP);
+			valuesByKey.set(key, (valuesByKey.get(key) ?? new Set()).add(value));
+		};
+		for (const entry of this.filter.props) addProp(entry);
 		for (const { file } of this.filterPool) {
 			folders.add(file.parent?.path ?? "/");
 			for (const tag of this.fileTags(file)) tags.add(tag);
+			for (const entry of this.fileProperties(file)) addProp(entry);
 		}
 		const menu = new Menu();
-		const addOption = (value: string, icon: string, selected: Set<string>) =>
-			menu.addItem((item) =>
+		const addOption = (target: Menu, value: string, icon: string, selected: Set<string>, title = value) =>
+			target.addItem((item) =>
 				item
-					.setTitle(value)
-					.setIcon(icon)
+					.setTitle(title)
+					.setIcon(icon || null)
 					.setChecked(selected.has(value))
 					.onClick(() => {
 						if (!selected.delete(value)) selected.add(value);
@@ -414,17 +467,36 @@ export class BacklinksPanel extends Component implements HoverParent {
 					}),
 			);
 		const byName = (a: string, b: string) => a.localeCompare(b);
-		for (const folder of [...folders].sort(byName)) addOption(folder, "folder", this.filter.folders);
+		for (const folder of [...folders].sort(byName)) addOption(menu, folder, "folder", this.filter.folders);
 		if (folders.size > 0 && tags.size > 0) menu.addSeparator();
-		for (const tag of [...tags].sort(byName)) addOption(tag, "tag", this.filter.tags);
-		if (this.filter.folders.size + this.filter.tags.size > 0) {
+		for (const tag of [...tags].sort(byName)) addOption(menu, tag, "tag", this.filter.tags);
+		if (valuesByKey.size > 0 && folders.size + tags.size > 0) menu.addSeparator();
+		for (const key of [...valuesByKey.keys()].sort(byName)) {
+			const values = [...(valuesByKey.get(key) ?? [])].sort(byName);
+			const selectedCount = values.filter((v) => this.filter.props.has(`${key}${PROP_SEP}${v}`)).length;
+			menu.addItem((item) => {
+				item.setTitle(selectedCount > 0 ? `${key} (${selectedCount})` : key).setIcon("list");
+				// setSubmenu is not in the public typings but is supported by Obsidian.
+				const sub = (item as unknown as { setSubmenu(): Menu }).setSubmenu();
+				// Selected values always stay; the rest is capped so a property like a date can't flood the menu.
+				const shown = values.filter(
+					(v, i) => i < FILTER_MAX_PROPERTY_VALUES || this.filter.props.has(`${key}${PROP_SEP}${v}`),
+				);
+				for (const value of shown) addOption(sub, `${key}${PROP_SEP}${value}`, "", this.filter.props, value);
+				if (shown.length < values.length) {
+					sub.addSeparator();
+					sub.addItem((more) => more.setTitle(`${values.length - shown.length} more not shown`).setDisabled(true));
+				}
+			});
+		}
+		if (filterCount(this.filter) > 0) {
 			menu.addSeparator();
 			menu.addItem((item) =>
 				item
 					.setTitle("Clear filters")
 					.setIcon("x")
 					.onClick(() => {
-						this.filter = { folders: new Set(), tags: new Set() };
+						this.filter = emptyFilter();
 						this.render();
 					}),
 			);
